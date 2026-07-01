@@ -8,8 +8,8 @@ import (
 // helloHandler gelen istekleri karşılayan fonksiyondur
 func helloHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return //Eğer kullanıcı tam olarak ana sayfaya (/) gelmediyse, gidip arkaya garip bir şeyler yazdıysa ona 200 dönme, 404 Sayfa Bulunamadı (http.NotFound) hatası dön.
+		http.NotFound(w, r) //go nun hazır fonxu
+		return              //Eğer kullanıcı tam olarak ana sayfaya (/) gelmediyse, gidip arkaya garip bir şeyler yazdıysa ona 200 dönme, 404 Sayfa Bulunamadı (http.NotFound) hatası dön.
 	}
 
 	// HTTP durum kodunu 200 OK olarak ayarlıyoruz
@@ -19,7 +19,7 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, "200 - OK. Sunucu başarıyla çalışıyor!")
 }
 
-func main() {
+func main1() {
 	// "/" (endpoint) gelen istekleri helloHandler fonxuna yönlendiriyoruz
 	http.HandleFunc("/", helloHandler)
 
