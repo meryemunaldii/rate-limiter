@@ -54,7 +54,7 @@ func rateLimiterHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 
 	rdb = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379", //redise bağlandığımız port
+		Addr:     "rate-limiter-redis:6379", //redise bağlandığımız port
 		Password: "",
 		DB:       0,
 	})
