@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 )
 
@@ -23,11 +24,11 @@ func main1() {
 	// "/" (endpoint) gelen istekleri helloHandler fonxuna yönlendiriyoruz
 	http.HandleFunc("/", helloHandler)
 
-	fmt.Println("Sunucu 8080 portunda başlatılıyor... http://localhost:8080")
+	log.Println("Sunucu 8080 portunda başlatılıyor... http://localhost:8080")
 
 	// err handling
 	err := http.ListenAndServe(":8080", nil) //bu dinleme kodunu en alta yazıyoruz çünkü dinleme işlemini hep yapıyor.
 	if err != nil {
-		fmt.Println("Sunucu başlatılırken hata oluştu:", err)
+		log.Println("Sunucu başlatılırken hata oluştu:", err)
 	}
 }
