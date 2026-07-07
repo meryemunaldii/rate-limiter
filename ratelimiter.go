@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -32,7 +34,7 @@ func rateLimiterHandler(w http.ResponseWriter, r *http.Request) {
 		rdb.Expire(ctx, userIP, 1*time.Minute) //expire,hafızadaki ömrünü ayarlıyor
 	} //1 dk dolduğunda otomatik sıfırlar
 
-	fmt.Printf("[LOG] İstek Atan IP: %s | Toplam İstek Sayısı: %d\n", userIP, count)
+	log.Printf("[println] İstek Atan IP: %s | Toplam İstek Sayısı: %d\n", userIP, count)
 
 	// kontrol kısmı
 	if count > 5 {
@@ -54,7 +56,7 @@ func rateLimiterHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 
 	rdb = redis.NewClient(&redis.Options{
-		Addr:     "rate-limiter-redis:6379", //redise bağlandığımız port
+		Addr:     os.Getenv("REDIS_ADDR"), //redise bağlandığımız port
 		Password: "",
 		DB:       0,
 	})
@@ -63,17 +65,17 @@ func main() {
 	//eğer docker açık ve redis çalışıyorsa pong cevabı döner.
 	_, err := rdb.Ping(ctx).Result() //baştaki "_" pong cevbını çöpe atıyor. kaydetmiyor gereksşz diye
 	if err != nil {
-		fmt.Println("Docker Redis sunucusuna bağlanılamadı! Lütfen Docker'ın açık olduğundan emin olun.", err)
+		log.Println("Docker Redis sunucusuna bağlanılamadı! Lütfen Docker'ın açık olduğundan emin olun.", err)
 		return
 	}
-	fmt.Println("Docker Redis bağlantısı başarıyla kuruldu!")
+	log.Println("Docker Redis bağlantısı başarıyla kuruldu!")
 
 	// "/" endpoint'ine gelen istekleri bizim akıllı rateLimiterHandler fonksiyonuna yönlendiriyoruz
 	http.HandleFunc("/", rateLimiterHandler)
 
-	fmt.Println("Sunucu 8080 portunda başlatılıyor... http://localhost:8080")
+	log.Println("Sunucu 8080 portunda başlatılıyor... http://localhost:8080")
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
-		fmt.Println("Sunucu başlatılırken hata oldu:", err)
+		log.Println("Sunucu başlatılırken hata oldu:", err)
 	}
 }
