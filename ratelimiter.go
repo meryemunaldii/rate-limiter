@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -55,7 +56,7 @@ func rateLimiterHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 
 	rdb = redis.NewClient(&redis.Options{
-		Addr:     "redis-service:6379", //redise bağlandığımız port
+		Addr:     os.Getenv("REDIS_ADDR"), //redise bağlandığımız port
 		Password: "",
 		DB:       0,
 	})
