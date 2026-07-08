@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # 1. Servis:Redis
+  # 1. Servis: Redis
   redis-service:
     image: redis:latest
     container_name: rate-limiter-redis-compose  
@@ -10,20 +10,39 @@ services:
     networks:
       - rate-limiter-network
 
-  # 2. Servis:Go Uygulaması
+  # 2. Servis: Go Uygulaması
   go-app:
-    build: . # Dockerfile'ın bu klasörde olduğunu belirtiyoruz, otomatik build edecek
+    build: . 
     container_name: meryem-app-compose
     ports:
       - "8080:8080"
     depends_on:
-      - redis-service # Önce Redis'in ayağa kalkmasını bekle diyoruz
+      - redis-service 
+      - db-service # Go uygulaması artık PostgreSQL'in de açılmasını beklesin
     networks:
       - rate-limiter-network
     environment:
       REDIS_ADDR: "redis-service:6379"
       APP_PORT: "8080"
 
+  # 3. Servis: PostgreSQL Veritabanı
+  db-service:
+    image: postgres:15-alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: meryem_user
+      POSTGRES_PASSWORD: secret_password
+      POSTGRES_DB: rate_limiter_db
+    ports:
+      - "5432:5432"
+    networks:
+      - rate-limiter-network # Diğer servislerle konuşabilmesi için ağa bağladık
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
 networks:
   rate-limiter-network:
     driver: bridge
+
+volumes:
+  postgres_data:

@@ -8,11 +8,26 @@ import (
 	"os"
 	"time"
 
+	"database/sql" //standart sql paketi
+
+	_ "github.com/lib/pq" //postgresql
 	"github.com/redis/go-redis/v9"
 )
 
+var db *sql.DB        //postgresql db nesnesi
 var rdb *redis.Client //rdb:redis database
 var ctx = context.Background()
+
+// PostgreSQL'e log yazan fonksiyon
+func logToPostgreSQL(ip, endpoint, userAgent string, statusCode int) {
+	query := `INSERT INTO request_logs (ip_address, endpoint, user_agent, status_code, created_at) 
+	          VALUES ($1, $2, $3, $4, $5)`
+
+	_, err := db.Exec(query, ip, endpoint, userAgent, statusCode, time.Now())
+	if err != nil {
+		log.Println("PostgreSQL'e log kaydedilirken hata oluştu:", err)
+	}
+}
 
 func rateLimiterHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
@@ -22,6 +37,7 @@ func rateLimiterHandler(w http.ResponseWriter, r *http.Request) {
 
 	//İsteği atan kullanıcının IP adresini yakalıyoruz
 	userIP := r.RemoteAddr
+	userAgent := r.Header.Get("User-Agent")
 
 	//Redisteki sayacı 1 artırıyoruz (IP -> Key oluyor)
 	count, err := rdb.Incr(ctx, userIP).Result() //redisin komutu Incr(increment)
@@ -34,7 +50,7 @@ func rateLimiterHandler(w http.ResponseWriter, r *http.Request) {
 		rdb.Expire(ctx, userIP, 1*time.Minute) //expire,hafızadaki ömrünü ayarlıyor
 	} //1 dk dolduğunda otomatik sıfırlar
 
-	log.Printf("[println] İstek Atan IP: %s | Toplam İstek Sayısı: %d\n", userIP, count)
+	log.Printf("İstek Atan IP: %s | Toplam İstek Sayısı: %d\n", userIP, count)
 
 	// kontrol kısmı
 	if count > 5 {
@@ -43,6 +59,8 @@ func rateLimiterHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Sistem Kaydı:\n")
 		fmt.Fprintf(w, "-> Sizin IP Adresiniz (Key): %s\n", userIP)
 		fmt.Fprintf(w, "-> Bir dakikadaki toplam istek sayınız: %d (Sınır: 5)\n", count)
+		//Engellenen isteği de 429 koduyla Postgres'e yazıyoruz
+		logToPostgreSQL(userIP, r.URL.Path, userAgent, http.StatusTooManyRequests)
 		return
 	}
 
@@ -51,6 +69,8 @@ func rateLimiterHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Sistem Kaydı:\n")
 	fmt.Fprintf(w, "-> Sizin IP Adresiniz (Key): %s\n", userIP)
 	fmt.Fprintf(w, "-> Bir dakikadaki toplam istek sayınız: %d/5\n", count)
+	//Başarılı isteği 200 koduyla Postgres'e yazıyoruz
+	logToPostgreSQL(userIP, r.URL.Path, userAgent, http.StatusOK)
 }
 
 func main() {
@@ -69,6 +89,32 @@ func main() {
 		return
 	}
 	log.Println("Docker Redis bağlantısı başarıyla kuruldu!")
+
+	//postgresql bağlantı kısmı
+	// Bilgileri kodun içine gömmek yerine env den değişkenlerinden çekiyoruz
+	dbHost := os.Getenv("DB_HOST")     // docker-compose'da tanımladığımız servis adı (db-service)
+	dbPort := os.Getenv("DB_PORT")     // 5432
+	dbUser := os.Getenv("DB_USER")     // meryem_user
+	dbPass := os.Getenv("DB_PASSWORD") //
+	dbName := os.Getenv("DB_NAME")     // rate_limiter_db
+
+	// Sürücüye göndereceğimiz bağlantı metnini güvenli değişkenlerle oluşturuyoruz
+	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		dbHost, dbPort, dbUser, dbPass, dbName)
+
+	db, err = sql.Open("postgres", connStr)
+	if err != nil {
+		log.Println("PostgreSQL sürücü hatası:", err)
+		return
+	}
+	defer db.Close()
+
+	err = db.Ping()
+	if err != nil {
+		log.Println("Docker PostgreSQL sunucusuna bağlanılamadı!", err)
+		return
+	}
+	log.Println("Docker PostgreSQL bağlantısı başarıyla kuruldu!")
 
 	// "/" endpoint'ine gelen istekleri bizim akıllı rateLimiterHandler fonksiyonuna yönlendiriyoruz
 	http.HandleFunc("/", rateLimiterHandler)
