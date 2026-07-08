@@ -30,27 +30,17 @@ func logToPostgreSQL(ip, endpoint, userAgent string, statusCode int) {
 	}
 }
 
-func rateLimiterHandler(w http.ResponseWriter, r *http.Request) {
+func rateLimiterHandler(w http.ResponseWriter, r *http.Request) bool {
 	//İsteği atan kullanıcının IP adresini yakalıyoruz
 	userIP := r.RemoteAddr
 	userAgent := r.Header.Get("User-Agent")
 	endpoint := r.URL.Path
 
-	// Eğer istek rapor endpoint'ine geldiyse limit kontrolüne sokmadan direkt raporu gösterelim
-	if endpoint == "/api/report" {
-		ReportHandler(w, r)
-		return
-	}
-	// Sadece belirlediğimiz yeni test endpoint'lerine izin verelim, diğerleri 404 dönsün
-	if endpoint != "/" && endpoint != "/api/users" && endpoint != "/api/products" && endpoint != "/api/orders" {
-		http.NotFound(w, r)
-		return
-	}
 	//Redisteki sayacı 1 artırıyoruz (IP -> Key oluyor)
 	count, err := rdb.Incr(ctx, userIP).Result() //redisin komutu Incr(increment)
 	if err != nil {
 		http.Error(w, "Veritabanı hatası", http.StatusInternalServerError)
-		return //key e bak eğer bu ip daha önce geldiyse +1 yap. gelmediyse otomatik 1 yap
+		return false //key e bak eğer bu ip daha önce geldiyse +1 yap. gelmediyse otomatik 1 yap
 	}
 
 	if count == 1 {
@@ -68,27 +58,55 @@ func rateLimiterHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "-> Bir dakikadaki toplam istek sayınız: %d (Sınır: 5)\n", count)
 		//Engellenen isteği de 429 koduyla Postgres'e yazıyoruz
 		logToPostgreSQL(userIP, endpoint, userAgent, http.StatusTooManyRequests)
+		return false
+	}
+	// Limit aşılmadıysa veritabanına 200 yaz ve true dön
+	logToPostgreSQL(userIP, endpoint, userAgent, http.StatusOK)
+	return true
+}
+func HomeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	if !rateLimiterHandler(w, r) {
+		return
+	} // Önce hızı kontrol et, engellendiyse dur
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "200 - Başarılı! Ana Sayfaya Hoş Geldiniz.\n\n")
+	fmt.Fprintf(w, "Sistem Kaydı:\n-> IP: %s\n", r.RemoteAddr)
+}
+
+func UsersHandler(w http.ResponseWriter, r *http.Request) {
+	if !rateLimiterHandler(w, r) {
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	switch endpoint {
-	case "/":
-		fmt.Fprintf(w, "200 - Başarılı! Ana Sayfaya Hoş Geldiniz.\n\n")
-	case "/api/users":
-		fmt.Fprintf(w, "200 - Başarılı! Kullanıcı listesi yüklendi.\n\n")
-	case "/api/products":
-		fmt.Fprintf(w, "200 - Başarılı! Ürün listesi yüklendi.\n\n")
-	case "/api/orders":
-		fmt.Fprintf(w, "200 - Başarılı! Sipariş listesi yüklendi.\n\n")
-	}
-	fmt.Fprintf(w, "Sistem Kaydı:\n")
-	fmt.Fprintf(w, "-> Sizin IP Adresiniz (Key): %s\n", userIP)
-	fmt.Fprintf(w, "-> Bir dakikadaki toplam istek sayınız: %d/5\n", count)
-	//Başarılı isteği 200 koduyla Postgres'e yazıyoruz
-	logToPostgreSQL(userIP, endpoint, userAgent, http.StatusOK)
+	fmt.Fprintf(w, "200 - Başarılı! Kullanıcı listesi yüklendi.\n\n")
+	fmt.Fprintf(w, "Sistem Kaydı:\n-> IP: %s\n", r.RemoteAddr)
 }
 
+func ProductsHandler(w http.ResponseWriter, r *http.Request) {
+	if !rateLimiterHandler(w, r) {
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "200 - Başarılı! Ürün listesi yüklendi.\n\n")
+	fmt.Fprintf(w, "Sistem Kaydı:\n-> IP: %s\n", r.RemoteAddr)
+}
+
+func OrdersHandler(w http.ResponseWriter, r *http.Request) {
+	if !rateLimiterHandler(w, r) {
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "200 - Başarılı! Sipariş listesi yüklendi.\n\n")
+	fmt.Fprintf(w, "Sistem Kaydı:\n-> IP: %s\n", r.RemoteAddr)
+}
 func main() {
 
 	rdb = redis.NewClient(&redis.Options{
@@ -132,8 +150,12 @@ func main() {
 	}
 	log.Println("Docker PostgreSQL bağlantısı başarıyla kuruldu!")
 
-	// "/" endpoint'ine gelen istekleri bizim akıllı rateLimiterHandler fonksiyonuna yönlendiriyoruz
-	http.HandleFunc("/", rateLimiterHandler)
+	//yönlendirme
+	http.HandleFunc("/", HomeHandler)
+	http.HandleFunc("/api/users", UsersHandler)
+	http.HandleFunc("/api/products", ProductsHandler)
+	http.HandleFunc("/api/orders", OrdersHandler)
+	http.HandleFunc("/api/report", ReportHandler)
 
 	log.Println("Sunucu 8080 portunda başlatılıyor... http://localhost:8080")
 	err = http.ListenAndServe(":8080", nil)
