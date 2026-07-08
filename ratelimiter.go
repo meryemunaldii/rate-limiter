@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -30,15 +31,21 @@ func logToPostgreSQL(ip, endpoint, userAgent string, statusCode int) {
 }
 
 func rateLimiterHandler(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-
 	//İsteği atan kullanıcının IP adresini yakalıyoruz
 	userIP := r.RemoteAddr
 	userAgent := r.Header.Get("User-Agent")
+	endpoint := r.URL.Path
 
+	// Eğer istek rapor endpoint'ine geldiyse limit kontrolüne sokmadan direkt raporu gösterelim
+	if endpoint == "/api/report" {
+		ReportHandler(w, r)
+		return
+	}
+	// Sadece belirlediğimiz yeni test endpoint'lerine izin verelim, diğerleri 404 dönsün
+	if endpoint != "/" && endpoint != "/api/users" && endpoint != "/api/products" && endpoint != "/api/orders" {
+		http.NotFound(w, r)
+		return
+	}
 	//Redisteki sayacı 1 artırıyoruz (IP -> Key oluyor)
 	count, err := rdb.Incr(ctx, userIP).Result() //redisin komutu Incr(increment)
 	if err != nil {
@@ -60,17 +67,26 @@ func rateLimiterHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "-> Sizin IP Adresiniz (Key): %s\n", userIP)
 		fmt.Fprintf(w, "-> Bir dakikadaki toplam istek sayınız: %d (Sınır: 5)\n", count)
 		//Engellenen isteği de 429 koduyla Postgres'e yazıyoruz
-		logToPostgreSQL(userIP, r.URL.Path, userAgent, http.StatusTooManyRequests)
+		logToPostgreSQL(userIP, endpoint, userAgent, http.StatusTooManyRequests)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "200 - Başarılı! Hoş geldiniz.\n\n")
+	switch endpoint {
+	case "/":
+		fmt.Fprintf(w, "200 - Başarılı! Ana Sayfaya Hoş Geldiniz.\n\n")
+	case "/api/users":
+		fmt.Fprintf(w, "200 - Başarılı! Kullanıcı listesi yüklendi.\n\n")
+	case "/api/products":
+		fmt.Fprintf(w, "200 - Başarılı! Ürün listesi yüklendi.\n\n")
+	case "/api/orders":
+		fmt.Fprintf(w, "200 - Başarılı! Sipariş listesi yüklendi.\n\n")
+	}
 	fmt.Fprintf(w, "Sistem Kaydı:\n")
 	fmt.Fprintf(w, "-> Sizin IP Adresiniz (Key): %s\n", userIP)
 	fmt.Fprintf(w, "-> Bir dakikadaki toplam istek sayınız: %d/5\n", count)
 	//Başarılı isteği 200 koduyla Postgres'e yazıyoruz
-	logToPostgreSQL(userIP, r.URL.Path, userAgent, http.StatusOK)
+	logToPostgreSQL(userIP, endpoint, userAgent, http.StatusOK)
 }
 
 func main() {
@@ -124,4 +140,66 @@ func main() {
 	if err != nil {
 		log.Println("Sunucu başlatılırken hata oldu:", err)
 	}
+}
+
+func ReportHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json") //json verisi gidiyor
+
+	// hangi IP hangi endpoint'e en çok istek atmış
+	queryTopPairs := `
+		SELECT ip_address, endpoint, COUNT(*) as total_requests 
+		FROM request_logs 
+		GROUP BY ip_address, endpoint 
+		ORDER BY total_requests DESC 
+		LIMIT 5;`
+
+	rows, err := db.Query(queryTopPairs)
+	if err != nil {
+		http.Error(w, "Rapor hatası: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close() //fonx bittiğinde db kanalını otomaitk kapatır
+
+	type TopPair struct {
+		IPAddress     string `json:"ip_address"`
+		Endpoint      string `json:"endpoint"`
+		TotalRequests int    `json:"total_requests"`
+	}
+
+	var topPairs []TopPair
+	for rows.Next() {
+		var p TopPair
+		if err := rows.Scan(&p.IPAddress, &p.Endpoint, &p.TotalRequests); err == nil {
+			topPairs = append(topPairs, p)
+		}
+	}
+
+	//Genel popüler endpoint'ler
+	queryTopEndpoints := `SELECT endpoint, COUNT(*) as count FROM request_logs GROUP BY endpoint ORDER BY count DESC;`
+	rows2, err := db.Query(queryTopEndpoints)
+
+	type TopEndpoint struct {
+		Endpoint string `json:"endpoint"`
+		Count    int    `json:"count"`
+	}
+
+	var topEndpoints []TopEndpoint
+
+	if err == nil {
+		defer rows2.Close()
+		for rows2.Next() {
+			var e TopEndpoint
+			if err := rows2.Scan(&e.Endpoint, &e.Count); err == nil {
+				topEndpoints = append(topEndpoints, e)
+			}
+		}
+	}
+
+	// JSON Çıktısı oluşturma
+	reportResult := map[string]interface{}{ //go da key value oluşturmanın en kolay yolu.
+		"title":                 "Sistem İstek Raporu",
+		"top_ip_endpoint_pairs": topPairs,
+		"popular_endpoints":     topEndpoints,
+	}
+	json.NewEncoder(w).Encode(reportResult) //reportResult paketini alır ve json formatındaki string metne dönüştürür.w ile de tarayıcıcın ekraına basar
 }
