@@ -126,7 +126,7 @@ func main() {
 
 	//postgresql bağlantı kısmı
 	// Bilgileri kodun içine gömmek yerine env den değişkenlerinden çekiyoruz
-	dbHost := os.Getenv("DB_HOST")     // docker-compose'da tanımladığımız servis adı (db-service)
+	dbHost := os.Getenv("DB_HOST")     // docker-compose'da tanımladığımız servis adı
 	dbPort := os.Getenv("DB_PORT")     // 5432
 	dbUser := os.Getenv("DB_USER")     // meryem_user
 	dbPass := os.Getenv("DB_PASSWORD") //
@@ -141,7 +141,6 @@ func main() {
 		log.Println("PostgreSQL sürücü hatası:", err)
 		return
 	}
-	defer db.Close()
 
 	err = db.Ping()
 	if err != nil {
@@ -156,6 +155,7 @@ func main() {
 	http.HandleFunc("/api/products", ProductsHandler)
 	http.HandleFunc("/api/orders", OrdersHandler)
 	http.HandleFunc("/api/report", ReportHandler)
+	http.HandleFunc("/api/history", HistoryHandler)
 
 	log.Println("Sunucu 8080 portunda başlatılıyor... http://localhost:8080")
 	err = http.ListenAndServe(":8080", nil)
@@ -224,4 +224,56 @@ func ReportHandler(w http.ResponseWriter, r *http.Request) {
 		"popular_endpoints":     topEndpoints,
 	}
 	json.NewEncoder(w).Encode(reportResult) //reportResult paketini alır ve json formatındaki string metne dönüştürür.w ile de tarayıcıcın ekraına basar
+}
+
+// /api/history?ip=... şeklinde gelen istekleri işleyen endpoint
+func HistoryHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json") //Gönderdiğim veri düz metin değil json paketi
+
+	//URL'den ip parametresini çekiyoruz
+	targetIP := r.URL.Query().Get("ip")
+
+	if targetIP == "" {
+		http.Error(w, `{"error": "Lütfen sorgulamak için bir 'ip' parametresi girin. Örn: /api/history?ip=127.0.0.1"}`, http.StatusBadRequest)
+		return
+	}
+
+	//Sadece o IP'ye ait istatistikleri endpoint bazlı kümeleyen SQL sorgusu
+	query := `
+		SELECT endpoint, status_code, COUNT(*) as request_count 
+		FROM request_logs 
+		WHERE ip_address = $1
+		GROUP BY endpoint, status_code  
+		ORDER BY request_count DESC;`
+
+	rows, err := db.Query(query, targetIP)
+	if err != nil {
+		http.Error(w, `{"error": "Veritabanı sorgu hatası"}`, http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close() //sorgu sonucunda db de dönen satırlar gereksiz yer kaplamasın diye fonx işi bittiğinde otomatik kapanır.
+
+	// Verileri haritalamak için geçici struct yapısı
+	type IPStat struct {
+		Endpoint     string `json:"endpoint"`
+		StatusCode   int    `json:"status_code"`
+		RequestCount int    `json:"request_count"`
+	}
+
+	var stats []IPStat //yukarıda tanımladığımız IPStat yapısından oluşan boş bir liste oluşturduk
+	for rows.Next() {  //db den okunan her satırı bu listeye dolduracağız
+		var s IPStat
+		if err := rows.Scan(&s.Endpoint, &s.StatusCode, &s.RequestCount); err == nil {
+			stats = append(stats, s) //append: veriler başarıyla kopyalandıysa bu nesneyi stats dizisinin sonuna ekler
+		}
+	}
+
+	//Sonucu JSON formatında hazırlayıp dışarıya fırlatıyoruz
+	response := map[string]interface{}{ //go da paketleri hazırlamak için kullanılan map yapısı
+		"searched_ip":   targetIP,   //aranan ip
+		"total_records": len(stats), //toplam kaç farklı kayıt bulunduğu
+		"statistics":    stats,      //istatistik listesi
+	}
+
+	json.NewEncoder(w).Encode(response) //response mapini http üzerinden taşınabilecek json metnine dönüştürür
 }
