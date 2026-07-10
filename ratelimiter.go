@@ -13,6 +13,10 @@ import (
 
 	_ "github.com/lib/pq" //postgresql
 	"github.com/redis/go-redis/v9"
+
+	_ "rate-limiter-project/docs"
+
+	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 var db *sql.DB        //postgresql db nesnesi
@@ -107,6 +111,12 @@ func OrdersHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "200 - Başarılı! Sipariş listesi yüklendi.\n\n")
 	fmt.Fprintf(w, "Sistem Kaydı:\n-> IP: %s\n", r.RemoteAddr)
 }
+
+// @title           Rate Limiter API
+// @version         1.0
+// @description     Go, Redis ve PostgreSQL ile geliştirilmiş gelişmiş Rate Limiter projesi.
+// @host            localhost:8080
+// @BasePath        /
 func main() {
 
 	rdb = redis.NewClient(&redis.Options{
@@ -156,6 +166,7 @@ func main() {
 	http.HandleFunc("/api/orders", OrdersHandler)
 	http.HandleFunc("/api/report", ReportHandler)
 	http.HandleFunc("/api/history", HistoryHandler)
+	http.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 
 	log.Println("Sunucu 8080 portunda başlatılıyor... http://localhost:8080")
 	err = http.ListenAndServe(":8080", nil)
@@ -225,6 +236,18 @@ func ReportHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewEncoder(w).Encode(reportResult) //reportResult paketini alır ve json formatındaki string metne dönüştürür.w ile de tarayıcıcın ekraına basar
 }
+
+// HistoryHandler Go projesinin geçmiş istek analitiğini döner
+// @Summary      IP Geçmiş Analitiği Sorgulama
+// @Description  Belirtilen IP adresinin hangi endpoint'e kaç istek attığını ve aldığı durum kodlarını listeler.
+// @Tags         Analitik
+// @Accept       json
+// @Produce      json
+// @Param        ip   query     string  true  "Sorgulanacak IP Adresi (Örn: 127.0.0.1)"
+// @Success      200  {string}  string  "Başarılı Rapor Çıktısı"
+// @Failure      400  {string}  string  "Eksik parametre hatası"
+// @Failure      500  {string}  string  "Veritabanı sorgu hatası"
+// @Router       /api/history [get]
 
 // /api/history?ip=... şeklinde gelen istekleri işleyen endpoint
 func HistoryHandler(w http.ResponseWriter, r *http.Request) {

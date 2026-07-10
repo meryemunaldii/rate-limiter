@@ -10,8 +10,14 @@ COPY go.mod go.sum ./
 #Kütüphaneleri konteynerın içine indiriyoruz
 RUN go mod download
 
+#konteynerın içine swag aracını kuruyoruz.
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
 #Kalan bütün kod dosyalarımızı (/app klasörünün içine) kopyalıyoruz
 COPY . .
+
+#Konteyner ayağa kalkmadan önce dökümanları içeride üretiyoruz
+RUN swag init -g ratelimiter.go
 
 #Kodu derleyip "rate-limiter" adında tek bir çalıştırılabilir dosya yapıyoruz
 RUN go build -o rate-limiter .
