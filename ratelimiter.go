@@ -16,9 +16,9 @@ import (
 
 	_ "rate-limiter-project/docs"
 
-	httpSwagger "github.com/swaggo/http-swagger"
-
 	"rate-limiter-project/repository"
+
+	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 var db *sql.DB        //postgresql db nesnesi

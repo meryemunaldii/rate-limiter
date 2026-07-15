@@ -6,26 +6,9 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"rate-limiter-project/domain"
 )
-
-// Raporlar için veri yapıları
-type TopPair struct {
-	IPAddress     string `json:"ip_address"`
-	Endpoint      string `json:"endpoint"`
-	TotalRequests int    `json:"total_requests"`
-}
-
-type TopEndpoint struct {
-	Endpoint string `json:"endpoint"`
-	Count    int    `json:"count"`
-}
-
-// Geçmiş analitiği için veri yapısı
-type IPStat struct {
-	Endpoint     string `json:"endpoint"`
-	StatusCode   int    `json:"status_code"`
-	RequestCount int    `json:"request_count"`
-}
 
 // Repository tüm veritabanı ve redis işlemlerini tutan yapıdır
 type Repository struct {
@@ -53,7 +36,7 @@ func (r *Repository) LogToPostgreSQL(ip, endpoint, userAgent string, statusCode 
 }
 
 // GetTopEndpoints endpointleri listeler.
-func (r *Repository) GetTopEndpoints() ([]TopEndpoint, error) {
+func (r *Repository) GetTopEndpoints() ([]domain.TopEndpoint, error) {
 	query := `SELECT endpoint, COUNT(*) as count 
 	FROM request_logs
 	GROUP BY endpoint 
@@ -65,9 +48,9 @@ func (r *Repository) GetTopEndpoints() ([]TopEndpoint, error) {
 	}
 	defer rows.Close()
 
-	var endpoints []TopEndpoint
+	var endpoints []domain.TopEndpoint
 	for rows.Next() {
-		var e TopEndpoint
+		var e domain.TopEndpoint
 		if err := rows.Scan(&e.Endpoint, &e.Count); err == nil {
 			endpoints = append(endpoints, e)
 		}
@@ -76,7 +59,7 @@ func (r *Repository) GetTopEndpoints() ([]TopEndpoint, error) {
 }
 
 // GetTopIPEndpointPairs en çok istek atan IP-Endpoint çiftlerini getirir
-func (r *Repository) GetTopIPEndpointPairs() ([]TopPair, error) {
+func (r *Repository) GetTopIPEndpointPairs() ([]domain.TopPair, error) {
 	query := `SELECT ip_address, endpoint, COUNT(*) as total_requests 
               FROM request_logs 
               GROUP BY ip_address, endpoint 
@@ -88,9 +71,9 @@ func (r *Repository) GetTopIPEndpointPairs() ([]TopPair, error) {
 	}
 	defer rows.Close()
 
-	var pairs []TopPair
+	var pairs []domain.TopPair
 	for rows.Next() {
-		var p TopPair //verileri karşılamak için TopPair yapısından geçici bir nesne üretiyoruz.
+		var p domain.TopPair //verileri karşılamak için TopPair yapısından geçici bir nesne üretiyoruz.
 		if err := rows.Scan(&p.IPAddress, &p.Endpoint, &p.TotalRequests); err == nil {
 			pairs = append(pairs, p)
 		}
@@ -99,7 +82,7 @@ func (r *Repository) GetTopIPEndpointPairs() ([]TopPair, error) {
 }
 
 // GetIPHistory belirli bir IP'nin geçmiş analizini getirir
-func (r *Repository) GetIPHistory(targetIP string) ([]IPStat, error) {
+func (r *Repository) GetIPHistory(targetIP string) ([]domain.IPStat, error) {
 	query := `SELECT endpoint, status_code, COUNT(*) as request_count 
               FROM request_logs WHERE ip_address = $1
               GROUP BY endpoint, status_code ORDER BY request_count DESC;`
@@ -110,9 +93,9 @@ func (r *Repository) GetIPHistory(targetIP string) ([]IPStat, error) {
 	}
 	defer rows.Close()
 
-	var stats []IPStat
+	var stats []domain.IPStat
 	for rows.Next() {
-		var s IPStat
+		var s domain.IPStat
 		if err := rows.Scan(&s.Endpoint, &s.StatusCode, &s.RequestCount); err == nil {
 			stats = append(stats, s)
 		}
