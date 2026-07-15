@@ -16,19 +16,20 @@ import (
 
 	_ "rate-limiter-project/docs"
 
+	"rate-limiter-project/repository"
+
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 var db *sql.DB        //postgresql db nesnesi
 var rdb *redis.Client //rdb:redis database
 var ctx = context.Background()
+var repo *repository.Repository
 
-// PostgreSQL'e log yazan fonksiyon
+// PostgreSQL'e log yazan fonksiyon artık Repository'yi kullanıyor
 func logToPostgreSQL(ip, endpoint, userAgent string, statusCode int) {
-	query := `INSERT INTO request_logs (ip_address, endpoint, user_agent, status_code, created_at) 
-	          VALUES ($1, $2, $3, $4, $5)`
-
-	_, err := db.Exec(query, ip, endpoint, userAgent, statusCode, time.Now())
+	// Direkt yeni yazdığımız repository fonksiyonunu çağırıyoruz
+	err := repo.LogToPostgreSQL(ip, endpoint, userAgent, statusCode)
 	if err != nil {
 		log.Println("PostgreSQL'e log kaydedilirken hata oluştu:", err)
 	}
@@ -41,14 +42,14 @@ func rateLimiterHandler(w http.ResponseWriter, r *http.Request) bool {
 	endpoint := r.URL.Path
 
 	//Redisteki sayacı 1 artırıyoruz (IP -> Key oluyor)
-	count, err := rdb.Incr(ctx, userIP).Result() //redisin komutu Incr(increment)
+	count, err := repo.IncrementRedisKey(userIP) //rdb.Incr yerine repository fonxu çağırıyoruz.
 	if err != nil {
 		http.Error(w, "Veritabanı hatası", http.StatusInternalServerError)
 		return false //key e bak eğer bu ip daha önce geldiyse +1 yap. gelmediyse otomatik 1 yap
 	}
 
 	if count == 1 {
-		rdb.Expire(ctx, userIP, 1*time.Minute) //expire,hafızadaki ömrünü ayarlıyor
+		repo.SetExpireRedisKey(userIP, 1*time.Minute) //rdb.Expire yerine repository fonxunu çağırıyoruz.
 	} //1 dk dolduğunda otomatik sıfırlar
 
 	log.Printf("İstek Atan IP: %s | Toplam İstek Sayısı: %d\n", userIP, count)
@@ -159,6 +160,9 @@ func main() {
 	}
 	log.Println("Docker PostgreSQL bağlantısı başarıyla kuruldu!")
 
+	// db ve rdb bağlantı kodlarından hemen sonra:
+	repo = repository.NewRepository(db, rdb)
+
 	//yönlendirme
 	http.HandleFunc("/", HomeHandler)
 	http.HandleFunc("/api/users", UsersHandler)
@@ -176,65 +180,29 @@ func main() {
 }
 
 func ReportHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json") //json verisi gidiyor
+	w.Header().Set("Content-Type", "application/json") // json verisi gidiyor
 
-	// hangi IP hangi endpoint'e en çok istek atmış
-	queryTopPairs := `
-		SELECT ip_address, endpoint, COUNT(*) as total_requests 
-		FROM request_logs 
-		GROUP BY ip_address, endpoint 
-		ORDER BY total_requests DESC 
-		LIMIT 5;`
-
-	rows, err := db.Query(queryTopPairs)
+	// 1. En çok istek atan IP-Endpoint çiftlerini repodan çekiyoruz
+	topPairs, err := repo.GetTopIPEndpointPairs()
 	if err != nil {
 		http.Error(w, "Rapor hatası: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close() //fonx bittiğinde db kanalını otomaitk kapatır
 
-	type TopPair struct {
-		IPAddress     string `json:"ip_address"`
-		Endpoint      string `json:"endpoint"`
-		TotalRequests int    `json:"total_requests"`
-	}
-
-	var topPairs []TopPair
-	for rows.Next() {
-		var p TopPair
-		if err := rows.Scan(&p.IPAddress, &p.Endpoint, &p.TotalRequests); err == nil {
-			topPairs = append(topPairs, p)
-		}
-	}
-
-	//Genel popüler endpoint'ler
-	queryTopEndpoints := `SELECT endpoint, COUNT(*) as count FROM request_logs GROUP BY endpoint ORDER BY count DESC;`
-	rows2, err := db.Query(queryTopEndpoints)
-
-	type TopEndpoint struct {
-		Endpoint string `json:"endpoint"`
-		Count    int    `json:"count"`
-	}
-
-	var topEndpoints []TopEndpoint
-
-	if err == nil {
-		defer rows2.Close()
-		for rows2.Next() {
-			var e TopEndpoint
-			if err := rows2.Scan(&e.Endpoint, &e.Count); err == nil {
-				topEndpoints = append(topEndpoints, e)
-			}
-		}
+	// 2. En popüler endpoint'leri repodan çekiyoruz
+	topEndpoints, err := repo.GetTopEndpoints()
+	if err != nil {
+		http.Error(w, "Rapor hatası: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	// JSON Çıktısı oluşturma
-	reportResult := map[string]interface{}{ //go da key value oluşturmanın en kolay yolu.
+	reportResult := map[string]interface{}{
 		"title":                 "Sistem İstek Raporu",
 		"top_ip_endpoint_pairs": topPairs,
 		"popular_endpoints":     topEndpoints,
 	}
-	json.NewEncoder(w).Encode(reportResult) //reportResult paketini alır ve json formatındaki string metne dönüştürür.w ile de tarayıcıcın ekraına basar
+	json.NewEncoder(w).Encode(reportResult)
 }
 
 // HistoryHandler Go projesinin geçmiş istek analitiğini döner
@@ -248,12 +216,10 @@ func ReportHandler(w http.ResponseWriter, r *http.Request) {
 // @Failure      400  {string}  string  "Eksik parametre hatası"
 // @Failure      500  {string}  string  "Veritabanı sorgu hatası"
 // @Router       /api/history [get]
-
-// /api/history?ip=... şeklinde gelen istekleri işleyen endpoint
 func HistoryHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json") //Gönderdiğim veri düz metin değil json paketi
+	w.Header().Set("Content-Type", "application/json") // Gönderdiğim veri json paketi
 
-	//URL'den ip parametresini çekiyoruz
+	// URL'den ip parametresini çekiyoruz
 	targetIP := r.URL.Query().Get("ip")
 
 	if targetIP == "" {
@@ -261,42 +227,19 @@ func HistoryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//Sadece o IP'ye ait istatistikleri endpoint bazlı kümeleyen SQL sorgusu
-	query := `
-		SELECT endpoint, status_code, COUNT(*) as request_count 
-		FROM request_logs 
-		WHERE ip_address = $1
-		GROUP BY endpoint, status_code  
-		ORDER BY request_count DESC;`
-
-	rows, err := db.Query(query, targetIP)
+	// 3. O ip ye ait geçmiş analitiğini repodan tek satırda çekiyoruz
+	stats, err := repo.GetIPHistory(targetIP)
 	if err != nil {
 		http.Error(w, `{"error": "Veritabanı sorgu hatası"}`, http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close() //sorgu sonucunda db de dönen satırlar gereksiz yer kaplamasın diye fonx işi bittiğinde otomatik kapanır.
 
-	// Verileri haritalamak için geçici struct yapısı
-	type IPStat struct {
-		Endpoint     string `json:"endpoint"`
-		StatusCode   int    `json:"status_code"`
-		RequestCount int    `json:"request_count"`
+	// Sonucu json formatında hazırlayıp dışarıya fırlatıyoruz
+	response := map[string]interface{}{
+		"searched_ip":   targetIP,
+		"total_records": len(stats),
+		"statistics":    stats,
 	}
 
-	var stats []IPStat //yukarıda tanımladığımız IPStat yapısından oluşan boş bir liste oluşturduk
-	for rows.Next() {  //db den okunan her satırı bu listeye dolduracağız
-		var s IPStat
-		if err := rows.Scan(&s.Endpoint, &s.StatusCode, &s.RequestCount); err == nil {
-			stats = append(stats, s) //append: veriler başarıyla kopyalandıysa bu nesneyi stats dizisinin sonuna ekler
-		}
-	}
-
-	//Sonucu JSON formatında hazırlayıp dışarıya fırlatıyoruz
-	response := map[string]interface{}{ //go da paketleri hazırlamak için kullanılan map yapısı
-		"searched_ip":   targetIP,   //aranan ip
-		"total_records": len(stats), //toplam kaç farklı kayıt bulunduğu
-		"statistics":    stats,      //istatistik listesi
-	}
-
-	json.NewEncoder(w).Encode(response) //response mapini http üzerinden taşınabilecek json metnine dönüştürür
+	json.NewEncoder(w).Encode(response)
 }
