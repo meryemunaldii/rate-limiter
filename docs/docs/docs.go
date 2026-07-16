@@ -14,52 +14,7 @@ const docTemplate = `{
     },
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
-    "paths": {
-        "/api/history": {
-            "get": {
-                "description": "Belirtilen IP adresinin hangi endpoint'e kaç istek attığını ve aldığı durum kodlarını listeler.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Analitik"
-                ],
-                "summary": "IP Geçmiş Analitiği Sorgulama",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Sorgulanacak IP Adresi (Örn: 127.0.0.1)",
-                        "name": "ip",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Başarılı Rapor Çıktısı",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "400": {
-                        "description": "Eksik parametre hatası",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Veritabanı sorgu hatası",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        }
-    }
+    "paths": {}
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it

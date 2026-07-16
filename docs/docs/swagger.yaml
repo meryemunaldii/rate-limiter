@@ -5,35 +5,5 @@ info:
   description: Go, Redis ve PostgreSQL ile geliştirilmiş gelişmiş Rate Limiter projesi.
   title: Rate Limiter API
   version: "1.0"
-paths:
-  /api/history:
-    get:
-      consumes:
-      - application/json
-      description: Belirtilen IP adresinin hangi endpoint'e kaç istek attığını ve
-        aldığı durum kodlarını listeler.
-      parameters:
-      - description: 'Sorgulanacak IP Adresi (Örn: 127.0.0.1)'
-        in: query
-        name: ip
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Başarılı Rapor Çıktısı
-          schema:
-            type: string
-        "400":
-          description: Eksik parametre hatası
-          schema:
-            type: string
-        "500":
-          description: Veritabanı sorgu hatası
-          schema:
-            type: string
-      summary: IP Geçmiş Analitiği Sorgulama
-      tags:
-      - Analitik
+paths: {}
 swagger: "2.0"
