@@ -19,6 +19,8 @@ services:
     depends_on:
       - redis-service 
       - db-service # Go uygulaması artık PostgreSQL'in de açılmasını beklesin
+    env_file:
+      - .env
     networks:
       - rate-limiter-network
     environment:

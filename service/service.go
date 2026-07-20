@@ -3,10 +3,16 @@ package service
 
 import (
 	"errors"
+	"os"
 	"time"
 
 	"rate-limiter-project/repository"
+
+	"github.com/golang-jwt/jwt/v5" //jwt paketi
 )
+
+// Servisin gizli imza anahtarı (Secret Key).
+var jwtSecretKey = []byte("gizli_anahtar")
 
 // Service iş mantığı işlemlerini yürüten yapıdır
 type Service struct {
@@ -18,6 +24,39 @@ func NewService(repo *repository.Repository) *Service {
 	return &Service{
 		repo: repo,
 	}
+}
+
+// LoginUser kullanıcı bilgilerini doğrular ve token üretir
+func (s *Service) LoginUser(username, password string) (string, error) {
+	expectedUser := os.Getenv("APP_USER")
+	expectedPassword := os.Getenv("APP_PASSWORD")
+	jwtSecret := os.Getenv("JWT_SECRET")
+
+	if expectedUser == "" || expectedPassword == "" || jwtSecret == "" {
+		return "", errors.New("sistemsel yapılandırma hatası: çevre değişkenleri eksik")
+	}
+
+	// Şimdilik veritabanı yükü oluşturmamak için sabit kullanıcı adı ve şifre kontrolü
+	// İleride veritabanından çekilecek şekilde genişletilebilir
+	if username == expectedUser && password == expectedPassword {
+
+		// Token içinde taşıyacağımız verileri (claims) hazırlıyoruz
+		claims := jwt.MapClaims{
+			"username": username,
+			"role":     "admin",
+			"exp":      time.Now().Add(time.Hour * 24).Unix(), // 24 Saat sonra süresi dolacak
+		}
+
+		// HS256 algoritmasıyla token'ı oluşturup gizli anahtarımızla imzalıyoruz
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		tokenString, err := token.SignedString(jwtSecretKey)
+		if err != nil {
+			return "", err
+		}
+		return tokenString, nil
+	}
+
+	return "", errors.New("hatali kullanici adi veya sifre")
 }
 
 // CheckRateLimit gelen IP adresi için limit kontrolü ve loglama yapar
