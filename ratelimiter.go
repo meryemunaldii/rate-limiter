@@ -86,9 +86,11 @@ func main() {
 	http.HandleFunc("/api/users", handler.UsersHandler)
 	http.HandleFunc("/api/products", handler.ProductsHandler)
 	http.HandleFunc("/api/orders", handler.OrdersHandler)
-	http.HandleFunc("/api/report", handler.ReportHandler)
-	http.HandleFunc("/api/history", handler.HistoryHandler)
+
 	http.HandleFunc("/swagger/", httpSwagger.WrapHandler)
+	http.HandleFunc("/api/login", handler.LoginHandler) //kullanıcının token alacağı login yolu
+	http.HandleFunc("/api/report", handler.JWTMiddleware(handler.ReportHandler))
+	http.HandleFunc("/api/history", handler.JWTMiddleware(handler.HistoryHandler))
 
 	log.Println("Sunucu 8080 portunda başlatılıyor... http://localhost:8080")
 	err = http.ListenAndServe(":8080", nil)
