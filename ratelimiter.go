@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"fmt"
 	"log"
@@ -82,19 +85,63 @@ func main() {
 	handler := api.NewHandler(srv)
 
 	//yönlendirme
-	http.HandleFunc("/", handler.HomeHandler)
-	http.HandleFunc("/api/users", handler.UsersHandler)
-	http.HandleFunc("/api/products", handler.ProductsHandler)
-	http.HandleFunc("/api/orders", handler.OrdersHandler)
+	//kendi özel yönlendiricimizi oluşturduk.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handler.HomeHandler) //rotalar artık varsayılan go ya değil. bu mux a kaydediliyor.
+	mux.HandleFunc("/api/users", handler.UsersHandler)
+	mux.HandleFunc("/api/products", handler.ProductsHandler)
+	mux.HandleFunc("/api/orders", handler.OrdersHandler)
 
-	http.HandleFunc("/swagger/", httpSwagger.WrapHandler)
-	http.HandleFunc("/api/login", handler.LoginHandler) //kullanıcının token alacağı login yolu
-	http.HandleFunc("/api/report", handler.JWTMiddleware(handler.ReportHandler))
-	http.HandleFunc("/api/history", handler.JWTMiddleware(handler.HistoryHandler))
+	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
+	mux.HandleFunc("/api/login", handler.LoginHandler) //kullanıcının token alacağı login yolu
+	mux.HandleFunc("/api/report", handler.JWTMiddleware(handler.ReportHandler))
+	mux.HandleFunc("/api/history", handler.JWTMiddleware(handler.HistoryHandler))
 
-	log.Println("Sunucu 8080 portunda başlatılıyor... http://localhost:8080")
-	err = http.ListenAndServe(":8080", nil)
-	if err != nil {
-		log.Println("Sunucu başlatılırken hata oldu:", err)
+	//Custom HTTP Server Nesnesini Tanımlıyoruz (Graceful Shutdown İçin)
+	server := &http.Server{
+		Addr:    ":8080",
+		Handler: mux, //sunucuya bir istek geldiğinde bu muxu kullan dedik.
 	}
+
+	//İşletim sistemi sinyallerini yakalamak için bir kanal oluşturuyoruz
+	stopChan := make(chan os.Signal, 1)
+	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
+
+	//Sunucuyu arka planda başlatıyoruz
+	go func() {
+		log.Println("Sunucu 8080 portunda başlatılıyor... http://localhost:8080")
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Sunucu beklenmeyen bir hatayla kapandı: %v", err)
+		}
+	}()
+
+	// Kapanış sinyali (Ctrl+C veya docker stop) gelene kadar burada bekliyoruz
+	<-stopChan //kanalın içine bir sinyal düüşene kadar kodun akışını orada kilitler ve bekletir.
+	log.Println("\nKapatma sinyali alındı. Graceful Shutdown başlatılıyor...")
+
+	// Aktif isteklerin tamamlanması için 5 saniyelik zaman aşımı veriyoruz
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// HTTP Sunucusunu yeni istek almayacak şekilde durduruyoruz
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP sunucusu kapatılırken hata oluştu: %v", err)
+	} else {
+		log.Println("HTTP sunucusu yeni istek alımını durdurdu ve mevcut istekleri tamamladı.")
+	}
+
+	// Veritabanı ve Redis bağlantılarını graceful kapatıyoruz
+	if err := db.Close(); err != nil {
+		log.Printf("PostgreSQL bağlantısı kapatılırken hata: %v", err)
+	} else {
+		log.Println("PostgreSQL veritabanı bağlantısı kapandı.")
+	}
+
+	if err := rdb.Close(); err != nil {
+		log.Printf("Redis bağlantısı kapatılırken hata: %v", err)
+	} else {
+		log.Println("Redis bağlantısı kapandı.")
+	}
+
+	log.Println("Tüm sistem kaynakları temizlendi. Graceful Shutdown tamamlandı!")
 }
