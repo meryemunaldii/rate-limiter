@@ -100,7 +100,7 @@ func main() {
 	//Custom HTTP Server Nesnesini Tanımlıyoruz (Graceful Shutdown İçin)
 	server := &http.Server{
 		Addr:    ":8080",
-		Handler: mux, //sunucuya bir istek geldiğinde bu muxu kullan dedik.
+		Handler: handler.HeaderLoggerMiddleware(mux), //artık düzmux değil, log sarmallı veriyoruz.
 	}
 
 	//İşletim sistemi sinyallerini yakalamak için bir kanal oluşturuyoruz
