@@ -4,6 +4,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"rate-limiter-project/service"
@@ -174,4 +175,24 @@ func (h *Handler) HistoryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(history)
+}
+
+// gelen tüm http isteklerinin header bilgilerini loglar
+func (h *Handler) HeaderLoggerMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Println("--------------------------------------------------")
+		log.Printf("[REQUEST LOG] Metod: %s | URL: %s | IP: %s\n", r.Method, r.URL.Path, r.RemoteAddr)
+		log.Println("[HTTP HEADERS]:")
+
+		// Gelen tüm Header'ları döngüyle ekrana yazdırıyoruz
+		for name, values := range r.Header {
+			for _, value := range values {
+				log.Printf("   %s: %s\n", name, value)
+			}
+		}
+		log.Println("--------------------------------------------------")
+
+		// İsteği zincirdeki bir sonraki handler/middleware'e devrediyoruz
+		next.ServeHTTP(w, r)
+	})
 }
